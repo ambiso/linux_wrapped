@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufRead, BufReader, Lines, Split},
+    io::{BufRead, BufReader, Split},
     iter::Peekable,
 };
 
@@ -20,7 +20,7 @@ impl ZshHistory {
         let f = File::open(path).ok()?;
         let br = BufReader::new(f);
         Some(Self {
-            lines: br.split('\n' as u8).peekable(),
+            lines: br.split(b'\n').peekable(),
         })
     }
 }
@@ -30,31 +30,23 @@ impl Iterator for ZshHistory {
 
     fn next(&mut self) -> Option<Self::Item> {
         let item = self.lines.next();
-        if let None = item {
-            return None;
-        }
+        item.as_ref()?;
         let mut result = item
             .transpose()
             .ok()
             .flatten()
-            .map(|x| {
-                let mut it = x.split(|x| *x == ';' as u8);
+            .and_then(|x| {
+                let mut it = x.split(|x| *x == b';');
                 it.next();
                 it.next().map(|x| x.to_owned())
             })
-            .flatten()
             .unwrap();
 
-        loop {
-            // let next = .as_ref().unwrap().as_ref().unwrap();
-            if let Some(next) = self.lines.peek().as_ref() {
-                if next.as_ref().unwrap().starts_with(b":") {
-                    break;
-                }
-                result.extend(&self.lines.next().unwrap().unwrap());
-            } else {
+        while let Some(next) = self.lines.peek().as_ref() {
+            if next.as_ref().unwrap().starts_with(b":") {
                 break;
             }
+            result.extend(&self.lines.next().unwrap().unwrap());
         }
 
         Some(result)
@@ -69,28 +61,25 @@ struct State {
 
 fn process_command_history(state: &mut State, command_history: &mut dyn CommandHistory) {
     for entry in command_history {
-        let mut it = entry.split(|x| *x == ' ' as u8);
+        let mut it = entry.split(|x| *x == b' ');
         let cmd = it.next();
         let arg1 = it.next();
         let arg2 = it.next();
         (|| {
-            match (cmd, arg1, arg2) {
-                (Some(b"man"), Some(arg1), arg2) => {
-                    let mut page = arg1;
-                    if arg1.iter().all(|x| x.is_ascii_digit()) {
-                        if let Some(arg2) = arg2 {
-                            page = arg2;
-                        } else {
-                            return Ok(());
-                        }
+            if let (Some(b"man"), Some(arg1), arg2) = (cmd, arg1, arg2) {
+                let mut page = arg1;
+                if arg1.iter().all(|x| x.is_ascii_digit()) {
+                    if let Some(arg2) = arg2 {
+                        page = arg2;
+                    } else {
+                        return Ok(());
                     }
-                    *state
-                        .man_pages
-                        .entry(String::from_utf8(page.to_owned())?)
-                        .or_default() += 1;
                 }
-                _ => {}
-            };
+                *state
+                    .man_pages
+                    .entry(String::from_utf8(page.to_owned())?)
+                    .or_default() += 1;
+            }
             Result::<(), Box<dyn std::error::Error>>::Ok(())
         })()
         .ok();

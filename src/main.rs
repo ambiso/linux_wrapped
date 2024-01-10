@@ -3,7 +3,6 @@ use std::{
     fs::File,
     io::{BufRead, BufReader, Split},
     iter::Peekable,
-    os::unix::raw::gid_t,
 };
 
 use rand::seq::SliceRandom;
@@ -168,7 +167,7 @@ fn main() {
     for (count, cmd) in most_used_subcommands.iter().rev().take(5) {
         println!("{count} {cmd}");
     }
-    println!("");
+    println!();
 
     let mut most_used_commands: Vec<_> = state.commands.iter().map(|x| (x.1, x.0)).collect();
     most_used_commands.sort_unstable();

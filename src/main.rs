@@ -3,7 +3,10 @@ use std::{
     fs::File,
     io::{BufRead, BufReader, Split},
     iter::Peekable,
+    os::unix::raw::gid_t,
 };
+
+use rand::seq::SliceRandom;
 
 trait CommandHistory: Iterator<Item = Vec<u8>> {}
 
@@ -56,13 +59,22 @@ impl Iterator for ZshHistory {
 #[derive(Default)]
 struct State {
     man_pages: HashMap<String, u32>,
+    git_subcommands: HashMap<String, u32>,
     commands: HashMap<String, u32>,
 }
 
 fn process_command_history(state: &mut State, command_history: &mut dyn CommandHistory) {
     for entry in command_history {
         let mut it = entry.split(|x| *x == b' ');
-        let cmd = it.next();
+        let mut cmd = it.next();
+        while let Some(icmd) = cmd {
+            // incomplete parsing of env-vars (in theory this could be an escaped equals sign, or part of a string)
+            if icmd.contains(&b'=') {
+                cmd = it.next();
+            } else {
+                break;
+            }
+        }
         let arg1 = it.next();
         let arg2 = it.next();
         (|| {
@@ -84,6 +96,31 @@ fn process_command_history(state: &mut State, command_history: &mut dyn CommandH
         })()
         .ok();
         (|| {
+            match (cmd, arg1) {
+                (Some(b"g" | b"git"), Some(subcommand)) => {
+                    *state
+                        .git_subcommands
+                        .entry(String::from_utf8(subcommand.to_owned())?)
+                        .or_default() += 1;
+                }
+                (Some(b"gc" | b"gca"), _) => {
+                    *state
+                        .git_subcommands
+                        .entry(String::from_utf8(b"commit".to_vec())?)
+                        .or_default() += 1;
+                }
+                (Some(b"ga" | b"gau"), _) => {
+                    *state
+                        .git_subcommands
+                        .entry(String::from_utf8(b"add".to_vec())?)
+                        .or_default() += 1;
+                }
+                _ => {}
+            }
+            Result::<(), Box<dyn std::error::Error>>::Ok(())
+        })()
+        .ok();
+        (|| {
             if let Some(cmd) = cmd {
                 *state
                     .commands
@@ -98,15 +135,46 @@ fn process_command_history(state: &mut State, command_history: &mut dyn CommandH
 }
 
 fn main() {
+    let mut rng = rand::thread_rng();
     let mut state = State::default();
     if let Some(mut h) = ZshHistory::new() {
         process_command_history(&mut state, &mut h);
     }
 
     let mut most_used_man_pages: Vec<_> = state.man_pages.iter().map(|x| (x.1, x.0)).collect();
-    most_used_man_pages.sort_unstable();
-    println!("Your most used man pages:");
-    for (count, man_page) in most_used_man_pages.iter().rev().take(10) {
-        println!("{count} {man_page}");
+    let lookups: u64 = state.man_pages.iter().map(|x| *x.1 as u64).sum();
+    if lookups > 0 {
+        most_used_man_pages.sort_unstable();
+        println!("You looked up manual pages a total of {lookups} times! #RTFM");
+        println!(
+            "{}",
+            [
+                "You just couldn't get enough of reading these manuals:",
+                "In desperate times you turned to these man pages:"
+            ]
+            .choose(&mut rng)
+            .unwrap()
+        );
+        for (count, man_page) in most_used_man_pages.iter().rev().take(15) {
+            println!("{count} {man_page}");
+        }
+        println!();
     }
+
+    let mut most_used_subcommands: Vec<_> =
+        state.git_subcommands.iter().map(|x| (x.1, x.0)).collect();
+    most_used_subcommands.sort_unstable();
+    println!("Your favorite git subcommands are:");
+    for (count, cmd) in most_used_subcommands.iter().rev().take(5) {
+        println!("{count} {cmd}");
+    }
+    println!("");
+
+    let mut most_used_commands: Vec<_> = state.commands.iter().map(|x| (x.1, x.0)).collect();
+    most_used_commands.sort_unstable();
+    println!("Your top commands are:");
+    for (count, cmd) in most_used_commands.iter().rev().take(15) {
+        println!("{count} {cmd}");
+    }
+    println!("... maybe consider sponsoring them?");
 }

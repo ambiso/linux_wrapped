@@ -31,27 +31,27 @@ impl Iterator for ZshHistory {
     type Item = Vec<u8>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let item = self.lines.next();
-        item.as_ref()?;
-        let mut result = item
-            .transpose()
-            .ok()
-            .flatten()
-            .and_then(|x| {
+        loop {
+            let item = self.lines.next();
+            item.as_ref()?;
+            if let Some(mut result) = item.transpose().ok().flatten().and_then(|x| {
+                if x[0] != b':' {
+                    return None;
+                }
                 let mut it = x.split(|x| *x == b';');
                 it.next();
                 it.next().map(|x| x.to_owned())
-            })
-            .unwrap();
+            }) {
+                while let Some(next) = self.lines.peek().as_ref() {
+                    if next.as_ref().unwrap().starts_with(b":") {
+                        break;
+                    }
+                    result.extend(&self.lines.next().unwrap().unwrap());
+                }
 
-        while let Some(next) = self.lines.peek().as_ref() {
-            if next.as_ref().unwrap().starts_with(b":") {
-                break;
+                return Some(result);
             }
-            result.extend(&self.lines.next().unwrap().unwrap());
         }
-
-        Some(result)
     }
 }
 

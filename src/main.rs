@@ -35,7 +35,7 @@ impl Iterator for ZshHistory {
             let item = self.lines.next();
             item.as_ref()?;
             if let Some(mut result) = item.transpose().ok().flatten().and_then(|x| {
-                if let Some(b':') = x.first() {
+                if x.len() == 0 || x[0] != b':' {
                     return None;
                 }
                 let mut it = x.split(|x| *x == b';');
